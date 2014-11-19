@@ -68,8 +68,21 @@ class phRETS {
 	private $override_offset_protection = false;
 	private $use_post_method = false;
 	private $search_data = array();
+	// allow response format to be configurable
+	private $response_format = 'STANDARD-XML'; 	// or COMPACT or COMPACT-DECODED
 
 	public function __construct() { }
+
+	public function SetResponseFormat($format = 'COMPACT-DECODED') {
+		switch ($format) {
+			case 'COMPACT-DECODED':
+			case 'COMPACT':
+			case 'STANDARD-XML':
+				$this->response_format = $format;
+				return TRUE;
+		}
+		return FALSE;
+	}
 
 	public function GetLastServerResponse() {
 		return $this->last_server_response;
@@ -533,7 +546,7 @@ class phRETS {
 		else { }
 
 		if (!empty($optional_params['Select'])) {
-			$search_arguments['Select'] = $optional_params['Select'];
+			//$search_arguments['Select'] = $optional_params['Select'];
 		}
 		if (!empty($optional_params['RestrictedIndicator'])) {
 			$search_arguments['RestrictedIndicator'] = $optional_params['RestrictedIndicator'];
@@ -561,8 +574,8 @@ class phRETS {
 			if (!$result) {
 				return false;
 			}
-			list($headers, $body) = $result;
 
+			list($headers, $body) = $result;
 			$body = $this->fix_encoding($body);
 
 			$xml = $this->ParseXMLResponse($body);
@@ -653,7 +666,7 @@ class phRETS {
 						array(
 								'Type' => 'METADATA-LOOKUP_TYPE',
 								'ID' => $resource.':*',
-								'Format' => 'STANDARD-XML'
+								'Format' => $this->response_format
 								)
 						);
 
@@ -732,7 +745,7 @@ class phRETS {
 						array(
 								'Type' => 'METADATA-LOOKUP_TYPE',
 								'ID' => $resource.':'.$lookupname,
-								'Format' => 'STANDARD-XML'
+								'Format' => $this->response_format
 								)
 						);
 
@@ -799,7 +812,7 @@ class phRETS {
 						array(
 								'Type' => 'METADATA-RESOURCE',
 								'ID' => $id,
-								'Format' => 'STANDARD-XML'
+								'Format' => $this->response_format
 								)
 						);
 
@@ -820,9 +833,13 @@ class phRETS {
 
 		$this_resource = array();
 
-		// parse XML into a nice array
 		if ($xml->METADATA) {
-			foreach ($xml->METADATA->{'METADATA-RESOURCE'}->Resource as $key => $value) {
+			$xml = $xml->METADATA;
+		}
+
+		if ($this->response_format == 'STANDARD-XML') {
+			// parse XML into a nice array
+			foreach ($xml->{'METADATA-RESOURCE'}->Resource as $key => $value) {
 				$this_resource["{$value->ResourceID}"] = array(
 						'ResourceID' => "{$value->ResourceID}",
 						'StandardName'=>"{$value->StandardName}",
@@ -849,6 +866,31 @@ class phRETS {
 						'ValidationExternalVersion' => "{$value->ValidationExternalVersion}",
 						'ValidationExternalDate' => "{$value->ValidationExternalDate}"
 						);
+			}
+		} elseif ($xml->{'METADATA-RESOURCE'} && isset($xml->{'METADATA-RESOURCE'}->COLUMNS)) {
+
+			if (isset($xml->DELIMITER)) {
+				// delimiter found so we have at least a COLUMNS row to parse
+				$delimiter = chr("{$xml->DELIMITER->attributes()->value}");
+				// move deeper into structure
+				$xml = $xml->{'METADATA-RESOURCE'};
+			}
+
+			// parse columns
+			$columns = array();
+			if (isset($xml->COLUMNS)) {
+				$columns = explode($delimiter, trim($xml->COLUMNS[0]));
+			}
+
+			// parse data
+			if (isset($xml->DATA)) {
+				foreach ($xml->DATA as $row) {
+					$row = explode($delimiter, trim($row));
+					while (count($row) < count($columns)) {
+						$row[] = '';
+					}
+					$this_resource[] = array_combine($columns, $row);
+				}
 			}
 		}
 
@@ -880,7 +922,7 @@ class phRETS {
 						array(
 								'Type' => 'METADATA-TABLE',
 								'ID' => $id,
-								'Format' => 'STANDARD-XML'
+								'Format' => $this->response_format
 								)
 						);
 
@@ -898,7 +940,7 @@ class phRETS {
 		$this->last_request['ReplyCode'] = "{$xml['ReplyCode']}";
 		$this->last_request['ReplyText'] = "{$xml['ReplyText']}";
 
-		if ($xml['ReplyCode'] != 0) {
+		if (!isset($xml->{'METADATA-TABLE'}) && $xml['ReplyCode'] != 0) {
 			$this->set_error_info("rets", "{$xml['ReplyCode']}", "{$xml['ReplyText']}");
 			return false;
 		}
@@ -907,7 +949,12 @@ class phRETS {
 
 		// parse XML into a nice array
 		if ($xml->METADATA) {
-			foreach ($xml->METADATA->{'METADATA-TABLE'}->Field as $key) {
+			$xml = $xml->METADATA;
+		}
+
+		if ($this->response_format == 'STANDARD-XML') {
+
+			foreach ($xml->{'METADATA-TABLE'}->Field as $key) {
 				$this_table[] = array(
 						'SystemName' => "{$key->SystemName}",
 						'StandardName' => "{$key->StandardName}",
@@ -939,6 +986,36 @@ class phRETS {
 						'InKeyIndex' => "{$key->InKeyIndex}"
 						);
 			}
+		} else {
+
+			if (isset($xml->DELIMITER)) {
+				// delimiter found so we have at least a COLUMNS row to parse
+				$delimiter = chr("{$xml->DELIMITER->attributes()->value}");
+			} else {
+				$delimiter = "\t";
+			}
+
+			if (isset($xml->{'METADATA-TABLE'})) {
+				$xml = $xml->{'METADATA-TABLE'};
+			}
+
+			// parse columns
+			$columns = array();
+			if (isset($xml->COLUMNS)) {
+				$columns = explode($delimiter, trim($xml->COLUMNS[0]));
+			}
+
+			// parse data
+			if (isset($xml->DATA)) {
+				foreach ($xml->DATA as $row) {
+					$row = explode($delimiter, trim($row));
+					while (count($row) < count($columns)) {
+						$row[] = '';
+					}
+					$this_table[] = array_combine($columns, $row);
+				}
+			}
+
 		}
 
 		// return the big array
@@ -967,7 +1044,103 @@ class phRETS {
 						array(
 								'Type' => 'METADATA-OBJECT',
 								'ID' => $id,
-								'Format' => 'STANDARD-XML'
+								'Format' => $this->response_format
+								)
+						);
+
+		if (!$result) {
+			return false;
+		}
+		list($headers, $body) = $result;
+
+		$xml = $this->ParseXMLResponse($body);
+		if (!$xml) {
+			return false;
+		}
+
+		// log replycode and replytext for reference later
+		$this->last_request['ReplyCode'] = "{$xml['ReplyCode']}";
+		$this->last_request['ReplyText'] = "{$xml['ReplyText']}";
+
+		if (!isset($xml->{'METADATA-OBJECT'}) && $xml['ReplyCode'] != 0) {
+			$this->set_error_info("rets", "{$xml['ReplyCode']}", "{$xml['ReplyText']}");
+			return false;
+		}
+
+		$return_data = array();
+
+		if ($xml->METADATA) {
+			$xml = $xml->METADATA;
+		}
+
+		if  ($this->response_format == 'STANDARD-XML') {
+			if (isset($xml->{'METADATA-OBJECT'})) {
+				// parse XML into a nice array
+				foreach ($xml->{'METADATA-OBJECT'} as $key => $value) {
+					foreach ($value->Object as $key) {
+						if (!empty($key->ObjectType)) {
+							$return_data[] = array(
+									'MetadataEntryID' => "{$key->MetadataEntryID}",
+									'VisibleName' => "{$key->VisibleName}",
+									'ObjectTimeStamp' => "{$key->ObjectTimeStamp}",
+									'ObjectCount' => "{$key->ObjectCount}",
+									'ObjectType' => "{$key->ObjectType}",
+									'StandardName' => "{$key->StandardName}",
+									'MimeType' => "{$key->MimeType}",
+									'Description' => "{$key->Description}"
+									);
+						}
+					}
+				}
+			}
+		} else {
+
+			if (isset($xml->DELIMITER)) {
+				// delimiter found so we have at least a COLUMNS row to parse
+				$delimiter = chr("{$xml->DELIMITER->attributes()->value}");
+			} else {
+				$delimiter = "\t";
+			}
+
+			if (isset($xml->{'METADATA-OBJECT'})) {
+				$xml = $xml->{'METADATA-OBJECT'};
+			}
+
+			// parse columns
+			$columns = array();
+			if (isset($xml->COLUMNS)) {
+				$columns = explode($delimiter, trim($xml->COLUMNS[0]));
+			}
+
+			// parse data
+			if (isset($xml->DATA)) {
+				foreach ($xml->DATA as $row) {
+					$row = explode($delimiter, trim($row));
+					while (count($row) < count($columns)) {
+						$row[] = '';
+					}
+					$return_data[] = array_combine($columns, $row);
+				}
+			}
+		}
+
+		// send back array
+		return $return_data;
+	}
+
+	public function GetMetadataSystem() {
+		$this->reset_error_info();
+
+		if (empty($this->capability_url['GetMetadata'])) {
+			die("GetMetadataClasses() called but unable to find GetMetadata location.  Failed login?\n");
+		}
+
+		// request basic metadata information
+		$result = $this->RETSRequest($this->capability_url['GetMetadata'],
+						array(
+								'Type' => 'METADATA-SYSTEM',
+								'ID' => '*',
+								'Format' => 'COMPACT'
 								)
 						);
 
@@ -992,20 +1165,24 @@ class phRETS {
 
 		$return_data = array();
 
-		if (isset($xml->METADATA->{'METADATA-OBJECT'})) {
-			// parse XML into a nice array
-			foreach ($xml->METADATA->{'METADATA-OBJECT'} as $key => $value) {
-				foreach ($value->Object as $key) {
-					if (!empty($key->ObjectType)) {
+		// parse XML into a nice array
+		if ($xml->METADATA) {
+			foreach ($xml->METADATA->{'METADATA-CLASS'} as $key => $value) {
+				foreach ($value->Class as $key) {
+					if (!empty($key->ClassName)) {
 						$return_data[] = array(
-								'MetadataEntryID' => "{$key->MetadataEntryID}",
+								'ClassName' => "{$key->ClassName}",
 								'VisibleName' => "{$key->VisibleName}",
-								'ObjectTimeStamp' => "{$key->ObjectTimeStamp}",
-								'ObjectCount' => "{$key->ObjectCount}",
-								'ObjectType' => "{$key->ObjectType}",
 								'StandardName' => "{$key->StandardName}",
-								'MimeType' => "{$key->MimeType}",
-								'Description' => "{$key->Description}"
+								'Description' => "{$key->Description}",
+								'TableVersion' => "{$key->TableVersion}",
+								'TableDate' => "{$key->TableDate}",
+								'UpdateVersion' => "{$key->UpdateVersion}",
+								'UpdateDate' => "{$key->UpdateDate}",
+								'ClassTimeStamp' => "{$key->ClassTimeStamp}",
+								'DeletedFlagField' => "{$key->DeletedFlagField}",
+								'DeletedFlagValue' => "{$key->DeletedFlagValue}",
+								'HasKeyIndex' => "{$key->HasKeyIndex}"
 								);
 					}
 				}
@@ -1031,7 +1208,7 @@ class phRETS {
 						array(
 								'Type' => 'METADATA-CLASS',
 								'ID' => $id,
-								'Format' => 'STANDARD-XML'
+								'Format' => $this->response_format
 								)
 						);
 
@@ -1096,7 +1273,7 @@ class phRETS {
 						array(
 								'Type' => 'METADATA-CLASS',
 								'ID' => $id,
-								'Format' => 'STANDARD-XML'
+								'Format' => $this->response_format
 								)
 						);
 
@@ -1120,9 +1297,13 @@ class phRETS {
 
 		$return_data = array();
 
-		// parse XML into a nice array
 		if ($xml->METADATA) {
-			foreach ($xml->METADATA->{'METADATA-CLASS'} as $key => $value) {
+			$xml = $xml->METADATA;
+		}
+
+		if ($this->response_format == 'STANDARD-XML') {
+			// parse XML into a nice array
+			foreach ($xml->{'METADATA-CLASS'} as $key => $value) {
 				$resource = $value['Resource'];
 				$this_resource = array();
 				foreach ($value->Class as $key) {
@@ -1137,6 +1318,39 @@ class phRETS {
 								'UpdateVersion' => "{$key->UpdateVersion}",
 								'UpdateDate' => "{$key->UpdateDate}"
 								);
+					}
+				}
+
+				// prepare 2-deep array
+				$return_data[] = array('Resource' => "{$resource}", 'Data' => $this_resource);
+			}
+
+		} elseif ($xml->{'METADATA-CLASS'} && isset($xml->{'METADATA-RESOURCE'}->COLUMNS)) {
+
+			if (isset($xml->DELIMITER)) {
+				// delimiter found so we have at least a COLUMNS row to parse
+				$delimiter = chr("{$xml->DELIMITER->attributes()->value}");
+				// move deeper into structure
+			}
+
+			foreach ($xml->{'METADATA-CLASS'} as $e) {
+				$resource = $e->attributes()->Resource;
+
+				// parse columns
+				$columns = array();
+				if (isset($e->COLUMNS)) {
+					$columns = explode($delimiter, trim($e->COLUMNS[0], $delimiter));
+				}
+
+				// parse data
+				$this_resource = array();
+				if (isset($e->DATA)) {
+					foreach ($e->DATA as $row) {
+						$row = explode($delimiter, trim($row, $delimiter));
+						while (count($row) < count($columns)) {
+							$row[] = '';
+						}
+						$this_resource[] = array_combine($columns, $row);
 					}
 				}
 
@@ -1214,7 +1428,7 @@ class phRETS {
 						array(
 								'Type' => 'METADATA-SYSTEM',
 								'ID' => 0,
-								'Format' => 'STANDARD-XML'
+								'Format' => $this->response_format
 								)
 						);
 
@@ -1239,31 +1453,35 @@ class phRETS {
 		$system_version = "";
         $timezone_offset = "";
 
+		if ($xml->METADATA) {
+			$xml = $xml->METADATA;
+		}
+
 		if ($this->is_server_version("1_5_or_below")) {
-			if (isset($xml->METADATA->{'METADATA-SYSTEM'}->System->SystemID)) {
-				$system_id = "{$xml->METADATA->{'METADATA-SYSTEM'}->System->SystemID}";
+			if (isset($xml->{'METADATA-SYSTEM'}->System->SystemID)) {
+				$system_id = "{$xml->{'METADATA-SYSTEM'}->System->SystemID}";
 			}
-			if (isset($xml->METADATA->{'METADATA-SYSTEM'}->System->SystemDescription)) {
-				$system_description = "{$xml->METADATA->{'METADATA-SYSTEM'}->System->SystemDescription}";
+			if (isset($xml->{'METADATA-SYSTEM'}->System->SystemDescription)) {
+				$system_description = "{$xml->{'METADATA-SYSTEM'}->System->SystemDescription}";
 			}
 		}
 		else {
-			if (isset($xml->METADATA->{'METADATA-SYSTEM'}->SYSTEM->attributes()->SystemID)) {
-				$system_id = "{$xml->METADATA->{'METADATA-SYSTEM'}->SYSTEM->attributes()->SystemID}";
+			if (isset($xml->{'METADATA-SYSTEM'}->SYSTEM->attributes()->SystemID)) {
+				$system_id = "{$xml->{'METADATA-SYSTEM'}->SYSTEM->attributes()->SystemID}";
 			}
-			if (isset($xml->METADATA->{'METADATA-SYSTEM'}->SYSTEM->attributes()->SystemDescription)) {
-				$system_description = "{$xml->METADATA->{'METADATA-SYSTEM'}->SYSTEM->attributes()->SystemDescription}";
+			if (isset($xml->{'METADATA-SYSTEM'}->SYSTEM->attributes()->SystemDescription)) {
+				$system_description = "{$xml->{'METADATA-SYSTEM'}->SYSTEM->attributes()->SystemDescription}";
 			}
-			if (isset($xml->METADATA->{'METADATA-SYSTEM'}->SYSTEM->attributes()->TimeZoneOffset)) {
-				$timezone_offset = "{$xml->METADATA->{'METADATA-SYSTEM'}->SYSTEM->attributes()->TimeZoneOffset}";
+			if (isset($xml->{'METADATA-SYSTEM'}->SYSTEM->attributes()->TimeZoneOffset)) {
+				$timezone_offset = "{$xml->{'METADATA-SYSTEM'}->SYSTEM->attributes()->TimeZoneOffset}";
 			}
 		}
 
-		if (isset($xml->METADATA->{'METADATA-SYSTEM'}->SYSTEM->Comments)) {
-			$system_comments = "{$xml->METADATA->{'METADATA-SYSTEM'}->SYSTEM->Comments}";
+		if (isset($xml->{'METADATA-SYSTEM'}->SYSTEM->Comments)) {
+			$system_comments = "{$xml->{'METADATA-SYSTEM'}->SYSTEM->Comments}";
 		}
-		if (isset($xml->METADATA->{'METADATA-SYSTEM'}->attributes()->Version)) {
-			$system_version = (string) $xml->METADATA->{'METADATA-SYSTEM'}->attributes()->Version;
+		if (isset($xml->{'METADATA-SYSTEM'}->attributes()->Version)) {
+			$system_version = (string) $xml->{'METADATA-SYSTEM'}->attributes()->Version;
 		}
 
 		return array(
@@ -1503,9 +1721,9 @@ class phRETS {
 		if (!empty($data)) {
 			// parse XML function.  ability to replace SimpleXML with something later fairly easily
 			if (defined('LIBXML_PARSEHUGE')) {
-				$xml = @simplexml_load_string($data, 'SimpleXMLElement', LIBXML_PARSEHUGE);
+				$xml = simplexml_load_string($data, 'SimpleXMLElement', LIBXML_PARSEHUGE);
 			} else {
-				$xml = @simplexml_load_string($data);
+				$xml = simplexml_load_string($data);
 			}
 			if (!is_object($xml)) {
 				$this->set_error_info("xml", -1, "XML parsing error: {$data}");
