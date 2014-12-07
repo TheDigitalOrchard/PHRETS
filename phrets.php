@@ -464,11 +464,10 @@ class phRETS {
 
 			if (!empty($field_data)) {
 				$this_row = array();
-				var_dump($field_data);
+
 				// split up DATA row on delimiter found earlier
 				$delimiter = $this->search_data[$pointer_id]['delimiter_character'];
-				$field_data = explode($delimiter, trim($field_data, $delimiter));
-				var_dump($field_data);
+				$field_data = array_slice(explode($delimiter, $field_data), 1, -1);
 
 				foreach ($this->search_data[$pointer_id]['column_names'] as $key => $name) {
 					// assign each value to it's name retrieved in the COLUMNS earlier
