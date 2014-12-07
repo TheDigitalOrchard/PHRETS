@@ -464,11 +464,11 @@ class phRETS {
 
 			if (!empty($field_data)) {
 				$this_row = array();
-
+				var_dump($field_data);
 				// split up DATA row on delimiter found earlier
-				$field_data = preg_replace("/^{$this->search_data[$pointer_id]['delimiter_character']}/", "", $field_data);
-				$field_data = preg_replace("/{$this->search_data[$pointer_id]['delimiter_character']}\$/", "", $field_data);
-				$field_data = explode($this->search_data[$pointer_id]['delimiter_character'], $field_data);
+				$delimiter = $this->search_data[$pointer_id]['delimiter_character'];
+				$field_data = explode($delimiter, trim($field_data, $delimiter));
+				var_dump($field_data);
 
 				foreach ($this->search_data[$pointer_id]['column_names'] as $key => $name) {
 					// assign each value to it's name retrieved in the COLUMNS earlier
@@ -535,7 +535,6 @@ class phRETS {
         $search_arguments['Count'] = (!array_key_exists('Count', $optional_params)) ? 1 : $optional_params['Count'];
 		$search_arguments['Format'] = empty($optional_params['Format']) ? "COMPACT-DECODED" : $optional_params['Format'];
 		$search_arguments['Limit'] = empty($optional_params['Limit']) ? 99999999 : $optional_params['Limit'];
-
 		if (isset($optional_params['Offset'])) {
 			$search_arguments['Offset'] = $optional_params['Offset'];
 		}
@@ -546,7 +545,7 @@ class phRETS {
 		else { }
 
 		if (!empty($optional_params['Select'])) {
-			//$search_arguments['Select'] = $optional_params['Select'];
+			$search_arguments['Select'] = $optional_params['Select'];
 		}
 		if (!empty($optional_params['RestrictedIndicator'])) {
 			$search_arguments['RestrictedIndicator'] = $optional_params['RestrictedIndicator'];
@@ -869,12 +868,11 @@ class phRETS {
 			}
 		} elseif ($xml->{'METADATA-RESOURCE'} && isset($xml->{'METADATA-RESOURCE'}->COLUMNS)) {
 
-			if (isset($xml->DELIMITER)) {
-				// delimiter found so we have at least a COLUMNS row to parse
-				$delimiter = chr("{$xml->DELIMITER->attributes()->value}");
-				// move deeper into structure
-				$xml = $xml->{'METADATA-RESOURCE'};
-			}
+			// get delimiter, default to TAB
+			$delimiter = isset($xml->DELIMITER) ? chr("{$xml->DELIMITER->attributes()->value}") : chr('09');
+
+			// move deeper into structure
+			$xml = $xml->{'METADATA-RESOURCE'};
 
 			// parse columns
 			$columns = array();
@@ -1383,14 +1381,7 @@ class phRETS {
 	}
 
 	public function GetAllTransactions() {
-		// read through capability_urls read during the Login and return
-		$transactions = array();
-		if (is_array($this->capability_url)) {
-			foreach ($this->capability_url as $key => $value) {
-				$transactions[] = $key;
-			}
-		}
-		return $transactions;
+		return array_keys($this->capability_url);
 	}
 
 	public function LastRequestURL() {
@@ -1715,25 +1706,37 @@ class phRETS {
 		return true;
 	}
 
-	public function ParseXMLResponse($data = "") {
+	public function ParseXMLResponse($data = '') {
 		$this->reset_error_info();
 
 		if (!empty($data)) {
-			// parse XML function.  ability to replace SimpleXML with something later fairly easily
-			if (defined('LIBXML_PARSEHUGE')) {
-				$xml = simplexml_load_string($data, 'SimpleXMLElement', LIBXML_PARSEHUGE);
-			} else {
-				$xml = simplexml_load_string($data);
+
+			libxml_use_internal_errors(TRUE);
+			$dom = new DOMDocument('1.0', 'UTF-8');
+			$dom->strictErrorChecking = FALSE;
+			$dom->validateOnParse = FALSE;
+			$dom->recover = true;
+
+			$loaded = defined('LIBXML_PARSEHUGE')
+					? $dom->loadXML($data, LIBXML_PARSEHUGE)
+					: $dom->loadXML($data);
+
+			libxml_clear_errors();
+			libxml_use_internal_errors(FALSE);
+
+			if ($loaded) {
+				unset($data);
+				return simplexml_import_dom($dom);
 			}
-			if (!is_object($xml)) {
-				$this->set_error_info("xml", -1, "XML parsing error: {$data}");
-				return false;
+			else {
+				$this->set_error_info('xml', -1, "XML parsing error: {$data}");
+				unset($data);
+				return FALSE;
 			}
-			return $xml;
 		}
 		else {
-			$this->set_error_info("xml", -1, "XML parsing error.  No data to parse");
-			return false;
+			$this->set_error_info('xml', -1, "XML parsing error. No data to parse.");
+			return FALSE;
 		}
 	}
 
@@ -1815,7 +1818,8 @@ class phRETS {
 		}
 
 		if ($this->catch_last_response == true) {
-			$this->last_server_response = $this->last_response_headers_raw . $response_body;
+			//$this->last_server_response = $this->last_response_headers_raw . $response_body;
+			$this->last_server_response = $response_body;
 		}
 
 		if (isset($this->last_response_headers['WWW-Authenticate'])) {
