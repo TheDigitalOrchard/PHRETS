@@ -706,7 +706,7 @@ class phRETS {
 			return false;
 		}
 
-		if ($xml['ReplyCode'] != 0) {
+		if (!isset($xml->{'METADATA-LOOKUP_TYPE'}) && $xml['ReplyCode'] != 0) {
 			$this->set_error_info("rets", "{$xml['ReplyCode']}", "{$xml['ReplyText']}");
 			return false;
 		}
@@ -714,7 +714,7 @@ class phRETS {
 		$this_table = array();
 
 		// parse XML into a nice array
-		if ($xml->METADATA && $xml->METADATA->{'METADATA-LOOKUP_TYPE'}) {
+		if ($xml->METADATA->{'METADATA-LOOKUP_TYPE'}) {
 
 			foreach ($xml->METADATA->{'METADATA-LOOKUP_TYPE'} as $key) {
 				if (!empty($key->attributes()->Lookup)) {
@@ -1006,7 +1006,7 @@ class phRETS {
 						'Unique' => "{$key->Unique}",
 						'MetadataEntryID' => "{$key->MetadataEntryID}",
 						'ModTimeStamp' => "{$key->ModTimeStamp}",
-						'ForeignKeyName' => "{$key->ForiengKeyName}",
+						'ForeignKeyName' => "{$key->ForeignKeyName}",
 						'ForeignField' => "{$key->ForeignField}",
 						'InKeyIndex' => "{$key->InKeyIndex}"
 						);
