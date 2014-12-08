@@ -155,6 +155,7 @@ class phRETS {
 	}
 
 	public function GetObject($resource, $type, $id, $photo_number = '*', $location = 0) {
+
 		$this->reset_error_info();
 		$return_photos = array();
 
@@ -649,25 +650,30 @@ class phRETS {
 			}
 		}
 
-		if (is_resource($this->search_data[$this->int_result_pointer]['data'])) {
-			rewind($this->search_data[$this->int_result_pointer]['data']);
+		if (isset($this->search_data[$this->int_result_pointer]['data'])) {
+			if (is_resource($this->search_data[$this->int_result_pointer]['data'])) {
+				rewind($this->search_data[$this->int_result_pointer]['data']);
+			}
 		}
 
 		return $this->int_result_pointer;
 	}
 
 	public function Search($resource, $class, $query = "", $optional_params = array()) {
-
-		$int_result_pointer = $this->SearchQuery($resource, $class, $query, $optional_params);
-
-		if (is_resource($this->search_data[$int_result_pointer]['data'])) {
-			return $int_result_pointer;
-		} else {
-			$table = array();
-			while ($row = $this->FetchRow($int_result_pointer)) {
-				$table[] = $row;
+		if ($int_result_pointer = $this->SearchQuery($resource, $class, $query, $optional_params)) {
+			if (!isset($this->search_data[$int_result_pointer]['data'])) {
+				return array();
+			} elseif (is_resource($this->search_data[$int_result_pointer]['data'])) {
+				return $int_result_pointer;
+			} else {
+				$table = array();
+				while ($row = $this->FetchRow($int_result_pointer)) {
+					$table[] = $row;
+				}
+				return $table;
 			}
-			return $table;
+		} else {
+			return array();
 		}
 	}
 
