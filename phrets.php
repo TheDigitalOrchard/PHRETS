@@ -85,7 +85,16 @@ class phRETS {
 	}
 
 	public function GetLastServerResponse() {
-		return $this->last_server_response;
+		if (is_resource($this->last_server_response)) {
+			if (rewind($this->last_server_response) && ob_start()) {
+				fpassthru($this->last_server_response);
+				return ob_get_clean();
+			} else {
+				return NULL;
+			}
+		} else {
+			return $this->last_server_response;
+		}
 	}
 
 	public function FirewallTest() {
@@ -452,34 +461,28 @@ class phRETS {
 	}
 
 	public function FetchRow($pointer_id) {
-
-		$this_row = false;
-
+		$data = false;
 		if (!empty($pointer_id)) {
-
 			if (isset($this->search_data[$pointer_id]['data'])) {
-				$field_data = current($this->search_data[$pointer_id]['data']);
-				next($this->search_data[$pointer_id]['data']);
+				if (is_resource($this->search_data[$pointer_id]['data'])) {
+					$data = stream_get_line($this->search_data[$pointer_id]['data'], 100000, "\n");
+				} else {
+					$data = current($this->search_data[$pointer_id]['data']);
+					next($this->search_data[$pointer_id]['data']);
+				}
 			}
-
-			if (!empty($field_data)) {
-				$this_row = array();
-
+			if (!empty($data)) {
 				// split up DATA row on delimiter found earlier
 				$delimiter = $this->search_data[$pointer_id]['delimiter_character'];
-				$field_data = array_slice(explode($delimiter, $field_data), 1, -1);
-
-				foreach ($this->search_data[$pointer_id]['column_names'] as $key => $name) {
-					// assign each value to it's name retrieved in the COLUMNS earlier
-					$this_row[$name] = $field_data[$key];
-				}
+				$data = array_slice(explode($delimiter, $data), 1, -1);
+				// convert to associative
+				$data = array_combine($this->search_data[$pointer_id]['column_names'], $data);
 			}
 			else {
 				$this->FreeResult($pointer_id);
 			}
 		}
-
-		return $this_row;
+		return $data;
 	}
 
 	public function SearchQuery($resource, $class, $query = "", $optional_params = array()) {
@@ -601,10 +604,22 @@ class phRETS {
 			}
 
 			if (isset($xml->DATA)) {
-				foreach ($xml->DATA as $key) {
-					$field_data = "{$key}";
-					// split up DATA row on delimiter found earlier
-					$this->search_data[$this->int_result_pointer]['data'][] = $field_data;
+
+				if (!isset($this->search_data[$this->int_result_pointer]['data'])) {
+					if ($tmpfile = tmpfile()) {
+						$this->search_data[$this->int_result_pointer]['data'] = $tmpfile;
+					} else {
+						$this->search_data[$this->int_result_pointer]['data'] = array();
+					}
+					unset($tmpfile);
+				}
+
+				foreach ($xml->DATA as $field_data) {
+					if (is_resource($this->search_data[$this->int_result_pointer]['data'])) {
+						fwrite($this->search_data[$this->int_result_pointer]['data'], $field_data."\n");
+					} else {
+						$this->search_data[$this->int_result_pointer]['data'][] = $field_data;
+					}
 					$this->search_data[$this->int_result_pointer]['last_search_returned']++;
 				}
 			}
@@ -634,19 +649,26 @@ class phRETS {
 			}
 		}
 
+		if (is_resource($this->search_data[$this->int_result_pointer]['data'])) {
+			rewind($this->search_data[$this->int_result_pointer]['data']);
+		}
+
 		return $this->int_result_pointer;
 	}
 
 	public function Search($resource, $class, $query = "", $optional_params = array()) {
-		$data_table = array();
 
 		$int_result_pointer = $this->SearchQuery($resource, $class, $query, $optional_params);
 
-		while ($row = $this->FetchRow($int_result_pointer)) {
-			$data_table[] = $row;
+		if (is_resource($this->search_data[$int_result_pointer]['data'])) {
+			return $int_result_pointer;
+		} else {
+			$table = array();
+			while ($row = $this->FetchRow($int_result_pointer)) {
+				$table[] = $row;
+			}
+			return $table;
 		}
-
-		return $data_table;
 	}
 
 	public function GetAllLookupValues($resource) {
@@ -1809,14 +1831,18 @@ class phRETS {
 
 		curl_setopt($this->ch, CURLOPT_HTTPHEADER, array(trim($request_headers)));
 		// do it
-		$response_body = curl_exec($this->ch);
+		if ($response_body = tmpfile()) {
+			fwrite($response_body, curl_exec($this->ch));
+		} else {
+			$response_body = curl_exec($this->ch);
+		}
 		$response_code = curl_getinfo($this->ch, CURLINFO_HTTP_CODE);
 
 		if ($this->debug_mode == true) {
 			fwrite($this->debug_log, $response_body ."\n");
 		}
 
-		if ($this->catch_last_response == true) {
+		if ($this->catch_last_response) {
 			//$this->last_server_response = $this->last_response_headers_raw . $response_body;
 			$this->last_server_response = $response_body;
 		}
@@ -1845,12 +1871,31 @@ class phRETS {
 		}
 
 		if ($response_code != 200) {
-			$this->set_error_info("http", $response_code, $response_body);
+			if (is_resource($response_body)) {
+				if (rewind($response_body) && ob_start()) {
+					fpassthru($response_body);
+					$this->set_error_info("http", $response_code, ob_get_clean());
+					ob_end_clean();
+				} else {
+					$this->set_error_info("http", $response_code, '[Failed to get response body]');
+				}
+			} else {
+				$this->set_error_info("http", $response_code, $response_body);
+			}
 			return false;
 		}
 
 		// return raw headers and body
-		return array($this->last_response_headers_raw, $response_body);
+		if (is_resource($response_body)) {
+			if (rewind($response_body) && ob_start()) {
+				fpassthru($response_body);
+				return array($this->last_response_headers_raw, ob_get_clean());
+			} else {
+				return false;
+			}
+		} else {
+			return array($this->last_response_headers_raw, $response_body);
+		}
 	}
 
 	private function read_custom_curl_headers($handle, $call_string) {
