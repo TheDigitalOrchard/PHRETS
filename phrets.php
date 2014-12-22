@@ -466,7 +466,7 @@ class phRETS {
 		if (!empty($pointer_id)) {
 			if (isset($this->search_data[$pointer_id]['data'])) {
 				if (is_resource($this->search_data[$pointer_id]['data'])) {
-					$data = stream_get_line($this->search_data[$pointer_id]['data'], 100000, "\n");
+					$data = stream_get_line($this->search_data[$pointer_id]['data'], 100000, "\e");
 				} else {
 					$data = current($this->search_data[$pointer_id]['data']);
 					next($this->search_data[$pointer_id]['data']);
@@ -617,7 +617,7 @@ class phRETS {
 
 				foreach ($xml->DATA as $field_data) {
 					if (is_resource($this->search_data[$this->int_result_pointer]['data'])) {
-						fwrite($this->search_data[$this->int_result_pointer]['data'], $field_data."\n");
+						fwrite($this->search_data[$this->int_result_pointer]['data'], $field_data."\e");	// terminated by ESC character, not tab
 					} else {
 						$this->search_data[$this->int_result_pointer]['data'][] = $field_data;
 					}
